@@ -25,7 +25,7 @@ num_points = 20
 initial_design = emulator.design(my_priors, num_points=num_points)
 
 api_key = "dc9ac34f13609b805744e65558f52643"
-server = "130.88.41.197"
+server = "http://10.99.44.89:8080"
 
 wf_name = "TMAP"
 
