@@ -44,7 +44,7 @@ thickness_min, thickness_max = st.sidebar.slider(f"{X1_name} input range [{X1_un
 
 st.sidebar.header("Advanced Settings")
 
-r_squared_cutoff = st.sidebar.slider("Model quality cutoff (R squared)", 0., 1., 0.98, step=0.01)
+r_squared_cutoff = st.sidebar.slider("Model quality cutoff (R squared)", 0.7, 1., 0.99, step=0.01)
 batch_size = st.sidebar.slider("Active learning batch size", 4, 20, 4, step=1)
 
 constant = 1E9
@@ -125,12 +125,12 @@ if st.sidebar.button("Train Model"):
         "R2_history": [0.01]
     }
     if not emulator_performs:
-        fig2 = plt.figure(figsize=(6, 5))
         fig2 = px.line(
         df_score,
         x="batches", y="R2_history",
         )
         fig2.update_traces(marker=dict( size=5))
+        fig2.update_layout(height=650)
         score_plot_holder.plotly_chart(fig2)
         while R2 <r_squared_cutoff:
 
@@ -140,8 +140,13 @@ if st.sidebar.button("Train Model"):
 
             emulator_id = "Manchester_GDPS_Emulator"
             emulator = tl.Emulator(id=emulator_id)
-
-            df_input = run_simulator(i)
+            if not emulator_exists:
+                # replace with initial batch
+                df_input = run_simulator(i)
+                emulator_exists = 1
+            else:
+                # replace with active learning
+                df_input = run_simulator(i)
             
             dataset_id = "UoM_dataset"
             # Intialise a Dataset object
