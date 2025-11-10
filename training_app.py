@@ -65,6 +65,17 @@ def run_simulator(i):
 
 
 
+def update_3dplot(df_input):
+    fig = plt.figure(figsize=(6, 5))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(df_input["thickness"], df_input["solubility"], df_input["diffusivity"], color="black", cmap='viridis')
+    fig = px.scatter_3d(
+    df_input,
+    x="thickness", y="solubility", z="diffusivity",color="output_flow",
+    color_continuous_scale=colors, 
+    )
+    fig.update_traces(marker=dict( size=5))
+    training_plot_holder.plotly_chart(fig)
 
 
 
@@ -78,35 +89,43 @@ if st.sidebar.button("Train Model"):
     R2_history = []
     batches = []
     i = 0
+    emulator_exists = 0
+    emulator_performs = 0
     training_plot_holder = column1.empty()
     score_plot_holder = column2.empty()
     emulator_id = "Manchester_GDPS_Emulator"
     emulator = tl.Emulator(id=emulator_id)
+
+    df_input = {
+        "diffusivity": [],
+        "solubility": [],
+        "thickness": [],
+        "output_flow": []
+    }
     try:
         status.text("checking for existing emulator..." )
-        emulator.view_train_data()
+        df_input = emulator.view_train_data()
         scoreparams = tl.ScoreParams(metric="R2")
         R2 = np.array(emulator.score(params=scoreparams)).flatten()[0]
+        emulator_exists = 1
         if R2<r_squared_cutoff:
-            # activelearning
-            status.text("emulator exists but is not valid..." )       
+            status.text("emulator exists but is not valid..." )    
+
+
         else:
 
             status.text(f"emulator already exists with R squared of {R2}" )
+            emulator_performs = 1
     except:
-        
+        emulator_exists = 0
+    time.sleep(1)
+
+    update_3dplot(df_input)
+    if not emulator_exists:
         while R2 <r_squared_cutoff:
             status.text(f"active learning batch {i}")
-            fig = plt.figure(figsize=(6, 5))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_xlim([thickness_min,thickness_max])
-            ax.set_ylim([solubility_min,solubility_max])
-            ax.set_zlim([diffusivity_min,diffusivity_max])
-            ax.set_xlabel(f"{X1_name} [{X1_units}]")
-            ax.set_ylabel(f"{X2_name} [{X2_units}]")
-            ax.set_zlabel(f"{X3_name} [{X3_units}]")
-            ax.grid(False)
-            fig.tight_layout()
+
+
             fig2, ax2 = plt.subplots(1,1,figsize=(6, 5))
             ax2.spines['top'].set_visible(False)
             ax2.spines['right'].set_visible(False)
@@ -114,7 +133,6 @@ if st.sidebar.button("Train Model"):
             ax2.set_ylabel(r"$R^{2}$")
             fig2.tight_layout()
             if i==0:
-                training_plot_holder.pyplot(fig)
                 score_plot_holder.pyplot(fig2)
             emulator_id = "Manchester_GDPS_Emulator"
             emulator = tl.Emulator(id=emulator_id)
@@ -129,14 +147,8 @@ if st.sidebar.button("Train Model"):
 
             # Upload the dataset
             dataset.upload(df_input, verbose=True)
-            ax.scatter(df_input["thickness"], df_input["solubility"], df_input["diffusivity"], color="black", cmap='viridis')
-            fig = px.scatter_3d(
-            df_input,
-            x="thickness", y="solubility", z="diffusivity",color="output_flow",
-            color_continuous_scale=colors, 
-        )
-            fig.update_traces(marker=dict( size=5))
-            training_plot_holder.plotly_chart(fig)
+            update_3dplot(df_input)
+
 
             output_columns = ["output_flow"]
             params = tl.TrainParams(
@@ -176,6 +188,17 @@ if st.sidebar.button("Train Model"):
         progress.progress(100)
         status.text(f"R squared is {R2}, training complete!")
     # st.session_state["data"] = generate_data(n_samples, x_min, x_max, noise)
+
+if st.sidebar.button("Delete Model"):
+    emulator_id = "Manchester_GDPS_Emulator"
+    emulator = tl.Emulator(id=emulator_id)
+
+    try:
+        emulator.delete()
+        st.text("emulator deleted")
+
+    except:
+        st.text("no emulator")
 
 # Display data
 # if "data" in st.session_state:
