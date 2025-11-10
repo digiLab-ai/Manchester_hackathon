@@ -10,7 +10,7 @@ import time
 import os
 
 import twinlab as tl
-tl.set_api_key("")
+# tl.set_api_key("")
 
 import plotly.express as px
 colors = ["#16425B","#16D5C2","#EBF38B"]
@@ -41,18 +41,13 @@ option = st.sidebar.selectbox(
     (X1_name,X2_name,X3_name),
 )
 
+experiment_option = st.sidebar.selectbox(
+    "Experiment:",
+    ("Experiment A","Experiment B"),
+)
 
 constant = 1E9
-# replace with galaxy TMAP workflow
-def run_simulator(i):
-    df = pd.read_csv("Data//tmap-active-loop_training_data.csv")
-    df_input = pd.DataFrame({
-    "solubility": df["solubility"][:batch_size*(i+1)],
-    "diffusivity":constant*(df["diffusivity"][:batch_size*(i+1)]),
-    "thickness": df["thickness"][:batch_size*(i+1)],
-    "output_flow":df["output_flow"][:batch_size*(i+1)]
-    })
-    return df_input
+
 
 
 
@@ -64,7 +59,33 @@ status = st.empty()
 column1, column2 = st.columns(2)
 
 if st.sidebar.button("Run Inference"):
-    column1.image("calibration.gif",  use_container_width=True)
+    df_experiment = 0
+    df_experiment_std = 0
+    emulator_id = "Manchester_GDPS_Emulator"
+    emulator = tl.Emulator(id=emulator_id)
+
+    try:
+        status.text("checking for existing emulator..." )
+        df_input = emulator.view_train_data()
+        scoreparams = tl.ScoreParams(metric="R2")
+        R2 = np.array(emulator.score(params=scoreparams)).flatten()[0]
+        emulator_exists = 1
+        if R2<0.99:
+            status.text("emulator exists but is not valid..." )    
+
+
+        else:
+
+            status.text(f"emulator already exists with R squared of {R2}" )
+            emulator_performs = 1
+    except:
+        emulator_exists = 0
+    if emulator_exists:
+
+        df_obs = pd.DataFrame({'y': [0.1]})
+        df_std = pd.DataFrame({'y': [0.01]})
+        emulator.calibrate(df_obs, df_std)
+        column1.image("calibration.gif",  use_container_width=True)
     # st.session_state["data"] = generate_data(n_samples, x_min, x_max, noise)
 
 # Display data

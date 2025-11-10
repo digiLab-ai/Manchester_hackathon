@@ -13,7 +13,7 @@ import os
 # from uncertainty_engine.nodes.workflow import Workflow
 import twinlab as tl
 
-tl.set_api_key("tl_zATKGbFWx34DVRj9wIUryw")
+# tl.set_api_key("")
 import plotly.express as px
 colors = ["#16425B","#16D5C2","#EBF38B"]
 # -------------------------------
@@ -67,8 +67,6 @@ def run_simulator(i):
 
 def update_3dplot(df_input):
     fig = plt.figure(figsize=(6, 5))
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(df_input["thickness"], df_input["solubility"], df_input["diffusivity"], color="black", cmap='viridis')
     fig = px.scatter_3d(
     df_input,
     x="thickness", y="solubility", z="diffusivity",color="output_flow",
@@ -81,6 +79,7 @@ def update_3dplot(df_input):
 
 progress = st.progress(0)
 status = st.empty()
+status2 = st.empty()
 column1, column2 = st.columns(2)
 
 if st.sidebar.button("Train Model"):
@@ -121,19 +120,24 @@ if st.sidebar.button("Train Model"):
     time.sleep(1)
 
     update_3dplot(df_input)
-    if not emulator_exists:
+    df_score = {
+        "batches": [0.01],
+        "R2_history": [0.01]
+    }
+    if not emulator_performs:
+        fig2 = plt.figure(figsize=(6, 5))
+        fig2 = px.line(
+        df_score,
+        x="batches", y="R2_history",
+        )
+        fig2.update_traces(marker=dict( size=5))
+        score_plot_holder.plotly_chart(fig2)
         while R2 <r_squared_cutoff:
+
             status.text(f"active learning batch {i}")
 
 
-            fig2, ax2 = plt.subplots(1,1,figsize=(6, 5))
-            ax2.spines['top'].set_visible(False)
-            ax2.spines['right'].set_visible(False)
-            ax2.set_xlabel("batch number")
-            ax2.set_ylabel(r"$R^{2}$")
-            fig2.tight_layout()
-            if i==0:
-                score_plot_holder.pyplot(fig2)
+
             emulator_id = "Manchester_GDPS_Emulator"
             emulator = tl.Emulator(id=emulator_id)
 
@@ -143,7 +147,7 @@ if st.sidebar.button("Train Model"):
             # Intialise a Dataset object
             
             dataset = tl.Dataset(id=dataset_id)
-            status.text(f"Dataset uploading")
+            status2.text(f"Dataset uploading")
 
             # Upload the dataset
             dataset.upload(df_input, verbose=True)
@@ -156,7 +160,7 @@ if st.sidebar.button("Train Model"):
                 estimator="gaussian_process_regression",
 
             )
-            status.text(f"Emulator training...")
+            status2.text(f"Emulator training...")
             # Train the emulator using the train method
             emulator.train(
                 dataset=dataset,
@@ -171,13 +175,23 @@ if st.sidebar.button("Train Model"):
                 R2 = 0
             batches.append(i)
             R2_history.append(R2)
+            df_score = {
+                "batches": batches,
+                "R2_history": R2_history
+            }
 
-            ax2.plot(batches,R2_history,marker="o",color=colors[1])
-            ax2.set_xlim([0,10])
-            ax2.set_ylim([0,1])
-            score_plot_holder.pyplot(fig2)
+            # ax2.plot(batches,R2_history,marker="o",color=colors[1])
+            # ax2.set_xlim([0,10])
+            # ax2.set_ylim([0,1])
 
 
+            fig2 = plt.figure(figsize=(6, 5))
+            fig2 = px.line(
+            df_score,
+            x="batches", y="R2_history",
+            )
+            fig2.update_traces(marker=dict( size=5))
+            score_plot_holder.plotly_chart(fig2)
 
             progress.progress(int(R2*100))
 
@@ -195,10 +209,10 @@ if st.sidebar.button("Delete Model"):
 
     try:
         emulator.delete()
-        st.text("emulator deleted")
+        status.text("emulator deleted")
 
     except:
-        st.text("no emulator")
+        status.text("no emulator to delete")
 
 # Display data
 # if "data" in st.session_state:
