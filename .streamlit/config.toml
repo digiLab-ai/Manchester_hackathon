@@ -1,0 +1,7 @@
+[theme]
+primaryColor = "#16D5C2"          # affects sliders, checkboxes, radio buttons
+backgroundColor = "#ffffffff"       # main background
+secondaryBackgroundColor = "#F9F9FB"
+textColor = "#333333"
+font = "quicksand"
+
