@@ -11,9 +11,15 @@ import os
 import plotly.graph_objects as go
 import twinlab as tl
 # tl.set_api_key("")
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+
 
 import plotly.express as px
 colors = ["#16425B","#16D5C2","#EBF38B"]
+
+# Create a continuous colormap
+cmap = mcolors.LinearSegmentedColormap.from_list("custom_cmap", colors)
 # -------------------------------
 # App Configuration
 # -------------------------------
@@ -188,6 +194,7 @@ if st.sidebar.button("Run Inference"):
             emulator_performs = 1
     except:
         emulator_exists = 0
+    calib_result = 0
     if emulator_exists:
         if experiment_option == "Experiment A":
             df_experiment = df_experiment_A
@@ -196,19 +203,28 @@ if st.sidebar.button("Run Inference"):
             df_experiment = df_experiment_B
             df_experiment_std = df_experiment_B_std
         status.text("Running inference..." )
-        calibparams = tl.CalibrateParams(return_summary=False,start_location = "optimized",iterations=100)
+        calibparams = tl.CalibrateParams(return_summary=False,start_location = "optimized",iterations=10000)
         calib_result = emulator.calibrate(df_experiment, df_experiment_std,params=calibparams)
-        
-    for i in range(0,len(calib_result),1):
+        # st.text(len(calib_result))
+        colors_diff = []
+        for i in range(0,len(calib_result),1000):
 
-        fig3 = px.scatter_matrix(calib_result.iloc[:i],
-        dimensions=[X1_name,X2_name,X3_name])
-        fig3.update_traces(marker=dict(color = colors[1],opacity=0.3))
-        calib_plot_holder.plotly_chart(fig3)
-        fig.update_traces(opacity=calib_result["diffusivity"].iloc[i]/10)
-        experiment_holder.plotly_chart(fig)
+            fig3 = px.scatter_matrix(calib_result.iloc[:i],
+            dimensions=[X1_name,X2_name,X3_name])
+            fig3.update_traces(marker=dict(color = colors[1],opacity=0.3))
+            fig.update_layout(height=650)
+            calib_plot_holder.plotly_chart(fig3)
+            colors_diff.append(mcolors.to_hex(cmap(min(max(calib_result["diffusivity"].iloc[i]/10, 0), 1))))
+      
+
+            if colors_diff[-1] not in colors_diff[:-1]:
+                fig.update_traces(color=colors_diff[-1])
+                experiment_holder.plotly_chart(fig)
+            time.sleep(1)
+    else:
+        status.text("No emulator")
     status.text("Inference Complete!" )
     mean = np.mean(calib_result["diffusivity"])
     std = np.std(calib_result["diffusivity"])
-    st.text(f"diffusivity is {mean} pm {std}")
+    st.text(f"diffusivity is {round(mean,3)} ± {round(mean,3)}")
 
