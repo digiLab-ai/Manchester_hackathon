@@ -5,15 +5,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import time
 import os
-# from uncertainty_engine.client import Client, Environment
-# from uncertainty_engine.graph import Graph
-# from uncertainty_engine.nodes.basic import Add
-# from uncertainty_engine.nodes.base import Node
-# from uncertainty_engine_types import ResourceID
-# from uncertainty_engine.nodes.workflow import Workflow
-import twinlab as tl
 
-# tl.set_api_key("")
+import engine_helpers as engine
+from uncertainty_engine.client import Client, Environment
+os.environ["UE_USERNAME"] = "cyd.cowley@digilab.ai"
+os.environ["UE_PASSWORD"] = ""
+
+client = Client()
+client.authenticate()
+
 import plotly.express as px
 colors = ["#16425B","#16D5C2","#EBF38B"]
 # -------------------------------
@@ -39,10 +39,38 @@ X3_name = "diffusivity"
 X3_units = "1E19"
 output_column = "output_flow"
 
+
 # Data generation parameters
 diffusivity_min, diffusivity_max = st.sidebar.slider(f"{X3_name} input range [{X3_units}]", 0.1, 10.0, (0.1, 10.0))
 solubility_min, solubility_max = st.sidebar.slider(f"{X2_name} input range [{X2_units}]", 0.01, 0.1, (0.01, 0.1))
 thickness_min, thickness_max = st.sidebar.slider(f"{X1_name} input range [{X1_units}]", 1., 3., (1.9, 2.0),step=0.1)
+
+# model type
+simulator_type = st.sidebar.selectbox(
+    "Simulation Tool",
+    ("TMAP", "UOM_Microstructure"),
+)
+
+# project IDs
+projects_dict = {proj.name: proj.id for proj in client.projects.list_projects()}
+PROJECT_NAME = "UoM_LIBRTI"
+
+# dataset name for data uploaded to the engine
+dataset_name = "active_learning_0"
+
+# dataset name for simulation outputs
+filepath = "Data//tmap-active-loop_training_data.csv"
+
+output_column = "output_flow"
+input_columns = ["diffusivity","solubility","thickness"]
+
+MODEL_NAME = f'UoM_{simulator_type}_model'
+
+
+simulation_output_file = "Data//active_learning_output.csv"
+validation_file = "Data//validation.csv"
+
+
 
 bounds = pd.DataFrame({
     X1_name: (thickness_min,thickness_max),
@@ -50,11 +78,29 @@ bounds = pd.DataFrame({
     X3_name: (diffusivity_min,diffusivity_max),
 })
 
+npoints = 4
+# create a meshgrid of points within bounds
+X, Y, Z = np.meshgrid(np.linspace(bounds[X1_name][0],bounds[X1_name][1],num=npoints),
+                    np.linspace(bounds[X2_name][0],bounds[X2_name][1],num=npoints),
+                    np.linspace(bounds[X3_name][0],bounds[X3_name][1],num=npoints),
+                    )
+
+# prediction within specified bounds
+pred_data = pd.DataFrame({
+    X1_name: X.flatten(),
+    X2_name: Y.flatten(),
+    X3_name: Z.flatten(),
+
+
+})
+
+pred_data.to_csv(validation_file)
+
 # advanced model training settings
 st.sidebar.header("Advanced Settings")
 
 uncertainty_cutoff = st.sidebar.slider("Model quality cutoff (Average Uncertainty %)", 0.0, 100., 10.0, step=0.01)/100
-batch_size = st.sidebar.slider("Active learning batch size", 4, 20, 4, step=1)
+batch_size = st.sidebar.slider("Active learning batch size", 1, 10, 5, step=1)
 
 # to adjust diffusivity
 constant = 1E9
@@ -62,6 +108,9 @@ constant = 1E9
 
 # replace with galaxy TMAP workflow
 def run_simulator(i):
+    # if simulator_type=="TMAP":
+    # else:
+    
     df = pd.read_csv("Data//tmap-active-loop_training_data.csv")
     df_input = pd.DataFrame({
     "solubility": df["solubility"][:batch_size*(i+1)],
@@ -69,7 +118,8 @@ def run_simulator(i):
     "thickness": df["thickness"][:batch_size*(i+1)],
     "output_flow":df["output_flow"][:batch_size*(i+1)]
     })
-    return df_input
+
+    df_input.to_csv(simulation_output_file)
 
 
 
@@ -93,26 +143,35 @@ def update_3dplot(df_input):
     training_plot_holder.plotly_chart(fig)
 
 
-def score(emulator,bounds):
-    npoints = 3
-    # create a meshgrid of points within bounds
-    X, Y, Z = np.meshgrid(np.linspace(bounds[X1_name][0],bounds[X1_name][1],num=npoints),
-                        np.linspace(bounds[X2_name][0],bounds[X2_name][1],num=npoints),
-                        np.linspace(bounds[X3_name][0],bounds[X3_name][1],num=npoints),
-                        )
+def score(model_name,bounds):
 
-    # prediction within specified bounds
-    pred_data = pd.DataFrame({
-        X1_name: X.flatten(),
-        X2_name: Y.flatten(),
-        X3_name: Z.flatten(),
-        "output_flow": Z.flatten()*0,
+    # Upload the dataset
+    dataset_id_test = "test_data"
+    try:
+        client.resources.upload(
+            project_id=projects_dict[PROJECT_NAME],
+            name=dataset_id_test,
+            resource_type="dataset",
+            file_path=validation_file,
+        )
+    except:
+        client.resources.update(
+            project_id=projects_dict[PROJECT_NAME],
+            resource_id=engine.get_resource_id(client, PROJECT_NAME, dataset_id_test, resource_type="dataset"),
+            resource_type="dataset",
+            file_path=validation_file,
+        )
+    pred_grid, std_grid = engine.predict_model_workflow(
+        client=client,
+        predict_dataset=dataset_id_test,
+        project_name=PROJECT_NAME,
+        model_name=model_name,
+        is_print_full_output=False,
+        input_names = input_columns
+    )
 
-
-    })
-    pred_grid, std_grid = emulator.predict(pred_data)
     # return average uncertainty of predictions
-    return np.mean(np.array(std_grid).flatten())
+    return np.mean(np.array(std_grid).flatten())/np.mean(np.array(pred_grid).flatten())
     
 
     
@@ -122,9 +181,6 @@ status = st.empty()
 status2 = st.empty()
 column1, column2 = st.columns(2)
 
-# global variables
-emulator_id = "Manchester_GDPS_Emulator"
-dataset_id = "UoM_dataset"
 
 if st.sidebar.button("Train Model"):
 
@@ -136,7 +192,6 @@ if st.sidebar.button("Train Model"):
     emulator_performs = 0
     training_plot_holder = column1.empty()
     score_plot_holder = column2.empty()
-    emulator = tl.Emulator(id=emulator_id)
 
     df_input = {
         "diffusivity": [],
@@ -146,9 +201,14 @@ if st.sidebar.button("Train Model"):
     }
     try:
         status.text("checking for existing emulator..." )
-        df_input = emulator.view_train_data()
-        scoreparams = tl.ScoreParams(metric="R2")
-        uncertainty_score = score(emulator,bounds)/np.mean(df_input[output_column])
+
+        __ = engine.get_model_inputs(
+        client=client,
+        project_name=PROJECT_NAME,
+        model_name=MODEL_NAME,
+        )
+
+        uncertainty_score = score(MODEL_NAME,bounds)
 
 
         emulator_exists = 1
@@ -189,41 +249,58 @@ if st.sidebar.button("Train Model"):
 
 
 
-            emulator = tl.Emulator(id=emulator_id)
+            status2.text(f"Running {simulator_type} simulations")
             if not emulator_exists:
                 # replace with initial batch
-                df_input = run_simulator(i)
+                run_simulator(i)
                 emulator_exists = 1
             else:
                 # replace with active learning
-                df_input = run_simulator(i)
+                run_simulator(i)
             
 
             # Intialise a Dataset object
             
-            dataset = tl.Dataset(id=dataset_id)
+
             status2.text(f"Dataset uploading")
 
             # Upload the dataset
-            dataset.upload(df_input, verbose=True)
+            try:
+                client.resources.upload(
+                    project_id=projects_dict[PROJECT_NAME],
+                    name=dataset_name,
+                    resource_type="dataset",
+                    file_path=simulation_output_file,
+                )
+            except:
+                client.resources.update(
+                    project_id=projects_dict[PROJECT_NAME],
+                    resource_id=engine.get_resource_id(client, PROJECT_NAME, dataset_name, resource_type="dataset"),
+                    resource_type="dataset",
+                    file_path=simulation_output_file,
+                )
+            df_input = engine.get_data(
+            client=client,
+            project_name=PROJECT_NAME,
+            dataset_name=dataset_name
+            )
+
             update_3dplot(df_input)
 
 
-            params = tl.TrainParams(
-                train_test_ratio=0.7,
-                estimator="gaussian_process_regression",
 
-            )
             status2.text(f"Emulator training...")
             # Train the emulator using the train method
-            emulator.train(
-                dataset=dataset,
-                inputs=["diffusivity","solubility","thickness"],
-                outputs=[output_column],
-                params=params,
-                verbose=True,
-    )
-            uncertainty_score = score(emulator,bounds)/np.mean(df_input[output_column])
+            engine.train_and_save_model_workflow(client, 
+                   project_name=PROJECT_NAME,
+                   dataset_name=dataset_name, 
+                   input_names=input_columns,
+                   output_names=[output_column],
+                   save_model_name=MODEL_NAME,
+                   is_print_full_output=True
+                   )
+            
+            uncertainty_score = score(MODEL_NAME,bounds)
 
             batches.append(i)
             UQ_score_history.append(uncertainty_score)
@@ -250,13 +327,3 @@ if st.sidebar.button("Train Model"):
         status.text(f"uncertainty is {100*round(uncertainty_score,3)} %, training complete!")
     # st.session_state["data"] = generate_data(n_samples, x_min, x_max, noise)
 
-if st.sidebar.button("Delete Model"):
-    emulator_id = "Manchester_GDPS_Emulator"
-    emulator = tl.Emulator(id=emulator_id)
-
-    try:
-        emulator.delete()
-        status.text("emulator deleted")
-
-    except:
-        status.text("no emulator to delete")
