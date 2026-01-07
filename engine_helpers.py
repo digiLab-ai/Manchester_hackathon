@@ -63,6 +63,8 @@ def train_and_save_model_workflow(
     model_config = Node(
         node_name="ModelConfig",
         label="Model Config",
+        kernel="M32"
+
     )
     graph.add_node(model_config)  # add to graph
     output_config = model_config.make_handle("config")  # add handle
