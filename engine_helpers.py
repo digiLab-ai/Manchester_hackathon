@@ -675,3 +675,129 @@ def recommend(
     
     return rec_df
 
+
+
+def infer_model_workflow(client, 
+                   project_name: str,
+                   model_name: str,
+                   obs_dataset_name: str,
+                    noise_dataset_name: str,
+                   lower_bounds: list,
+                   upper_bounds: list,
+                   nsamples: int,
+                   is_print_full_output: bool = False) -> dict:
+    """
+    A workflow that uses a machine learning model to infer inputs given a measurement.
+    Here, we assume all resources have already been uploaded to the cloud.
+    :param client: The Uncertainty Engine client.
+    :param project_name: The name of the project.
+    :param obs_dataset_name: The name of the observation dataset.
+    :param noise_dataset_name: The name of the noise dataset.
+    :param lower_bounds: The lower bounds of the input parameters, in order of their appearance in training.
+    :param upper_bounds: The upper bounds of the input parameters, in order of their appearance in training.
+    :param nsamples: the number of samples in the MCMC
+    :return: The response from running the workflow.
+    """
+    # 1. Create the graph
+    graph = Graph()
+
+    # 2.b. Load dataset node
+    load_data_obs = Node(
+        node_name="LoadDataset",
+        label="Load Dataset",
+        file_id=wrap_resource_id(
+            get_resource_id(
+                client=client,
+                project_name=project_name, 
+                resource_name=obs_dataset_name, 
+                resource_type='dataset')
+                ),
+        project_id=get_project_id(
+            client=client,
+            project_name=project_name
+            ),
+    )
+
+    load_data_noise = Node(
+        node_name="LoadDataset",
+        label="Load Dataset",
+        file_id=wrap_resource_id(
+            get_resource_id(
+                client=client,
+                project_name=project_name, 
+                resource_name=noise_dataset_name, 
+                resource_type='dataset')
+                ),
+        project_id=get_project_id(
+            client=client,
+            project_name=project_name
+            ),
+    )
+
+    # 2.a. Load model node
+    load_model = Node(
+        node_name="LoadModel",
+        label="Load Model",
+        file_id=wrap_resource_id(
+            get_resource_id(
+                client=client,
+                project_name=project_name, 
+                resource_name=model_name, 
+                resource_type='model')
+                ),
+        project_id=get_project_id(
+            client=client,
+            project_name=project_name
+            ),
+    )
+
+    graph.add_node(load_data_obs)  # add to graph
+    data_obs = load_data_obs.make_handle("file")  # add handle
+    graph.add_node(load_data_noise)  # add to graph
+    data_noise = load_data_noise.make_handle("file")  # add handle
+    graph.add_node(load_model)  # add to graph
+    output_model = load_model.make_handle("file")  # add handle
+
+    MCMC = Node(
+        node_name="RunMcmc",
+        label="Run Mcmc",
+        forward_model=output_model,
+        lower_bounds = lower_bounds,
+        upper_bounds = upper_bounds,
+        num_mcmc_samples = nsamples,
+        num_warmup_steps = 100,
+        observed_data = data_obs,
+        observed_error = data_noise,
+        project_id=get_project_id(
+            client=client,
+            project_name=project_name
+            ),
+    )
+    graph.add_node(MCMC)  
+    samples = MCMC.make_handle("samples")  # add handle
+    # 2.e. Display node
+    download_samples = Node(
+        node_name="Download",
+        label="Download samples",
+        file=samples,
+    )
+    graph.add_node(download_samples)  # add to graph
+
+
+    pprint(graph.nodes)
+
+    workflow = Workflow(
+        graph=graph.nodes,
+        inputs=graph.external_input,
+        external_input_id=graph.external_input_id,
+        requested_output={
+            "Samples": download_samples.make_handle("file").model_dump(),
+            }
+        )
+
+    response = client.run_node(workflow)
+    url = response.model_dump()['outputs']['outputs']["Samples"]["samples"]
+    urlresponse = requests.get(url)
+    data = np.load(io.BytesIO(urlresponse.content))
+
+    return data
