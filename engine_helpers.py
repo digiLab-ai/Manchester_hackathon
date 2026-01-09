@@ -765,7 +765,7 @@ def infer_model_workflow(client,
         lower_bounds = lower_bounds,
         upper_bounds = upper_bounds,
         num_mcmc_samples = nsamples,
-        num_warmup_steps = 100,
+        num_warmup_steps = 2000,
         observed_data = data_obs,
         observed_error = data_noise,
         project_id=get_project_id(

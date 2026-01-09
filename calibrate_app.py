@@ -1,25 +1,25 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+
 import matplotlib.pyplot as plt
 import time
 import os
 import plotly.graph_objects as go
-import twinlab as tl
-# tl.set_api_key("")
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
+import engine_helpers as engine
+from uncertainty_engine.client import Client, Environment
 
+os.environ["UE_USERNAME"] = "cyd.cowley@digilab.ai"
+os.environ["UE_PASSWORD"] = ""
+
+client = Client(env="uat")
+client.authenticate()
 
 import plotly.express as px
-colors = ["#16425B","#16D5C2","#EBF38B"]
 
-# Create a continuous colormap
-cmap = mcolors.LinearSegmentedColormap.from_list("custom_cmap", colors)
+colors = ["#16425B", "#16D5C2", "#EBF38B"]
+
+
 # -------------------------------
 # App Configuration
 # -------------------------------
@@ -39,10 +39,57 @@ X2_name = "solubility"
 X2_units = "au"
 X3_name = "diffusivity"
 X3_units = "1E19"
-# Data generation parameters
 
 
-def update_experiment_plot():
+# project IDs
+projects_dict = {proj.name: proj.id for proj in client.projects.list_projects()}
+PROJECT_NAME = "UoM_LIBRTI"
+obs_file = "Data//observation.csv"
+noise_file = "Data//uncertainty.csv"
+input_columns = ["diffusivity", "solubility", "thickness"]
+
+
+lower_bounds = [0.02,1.0]
+upper_bounds = [0.08,100.0]
+obs_dataset_name = "observations"
+noise_dataset_name = "uncertainty"
+
+
+def score(model_name, bounds):
+
+    # Upload the dataset
+    dataset_id_test = "test_data"
+    try:
+        client.resources.upload(
+            project_id=projects_dict[PROJECT_NAME],
+            name=dataset_id_test,
+            resource_type="dataset",
+            file_path=validation_file,
+        )
+    except:
+        client.resources.update(
+            project_id=projects_dict[PROJECT_NAME],
+            resource_id=engine.get_resource_id(
+                client, PROJECT_NAME, dataset_id_test, resource_type="dataset"
+            ),
+            resource_type="dataset",
+            file_path=validation_file,
+        )
+    pred_grid, std_grid = engine.predict_model_workflow(
+        client=client,
+        predict_dataset=dataset_id_test,
+        project_name=PROJECT_NAME,
+        model_name=model_name,
+        is_print_full_output=False,
+        input_names=input_columns,
+    )
+
+    # return average uncertainty of predictions
+    return np.mean(np.array(std_grid).flatten()) / np.mean(
+        np.array(pred_grid).flatten()
+    )
+
+def update_experiment_plot(title="GDPS sample, unkown diffusivity"):
 
     # Parameters
     r = 1.0
@@ -108,6 +155,7 @@ def update_experiment_plot():
             zaxis_title="Z"
         )
     )
+    fig.update_layout(title=title)
     fig.update_layout(height=650,
     scene=dict(
         xaxis=dict(visible=False),
@@ -121,10 +169,7 @@ def update_experiment_plot():
     experiment_holder.plotly_chart(fig)
     return fig
 
-option = st.sidebar.selectbox(
-    "Inference Quantity",
-    (X1_name,X2_name,X3_name),
-)
+
 
 experiment_option = st.sidebar.selectbox(
     "Experiment:",
@@ -138,28 +183,28 @@ constant = 1E9
 
 
 df_experiment_A = pd.DataFrame({
-    "output_flow": [3],
-    "thickness": [1.95]
+    "output_flow": [3.0],
+    # "thickness": [1.95]
 
 })
 df_experiment_B= pd.DataFrame({
-    "output_flow": [10],
-    "thickness": [1.95]
+    "output_flow": [13.0],
+    # "thickness": [1.95]
 
 })
 
 df_experiment_A_std = pd.DataFrame({
     "output_flow": [0.01],
-    "thickness": [0.01]
+    # "thickness": [0.01]
 
 })
 
 df_experiment_B_std = pd.DataFrame({
     "output_flow": [0.01],
-    "thickness": [0.01]
+    # "thickness": [0.01]
 
 })
-
+uncertainty_cutoff = 0.3
 progress = st.progress(0)
 status = st.empty()
 column1, column2 = st.columns(2)
@@ -168,32 +213,76 @@ calib_plot_holder = column2.empty()
 fig = update_experiment_plot()
     
 if st.sidebar.button("Run Inference"):
+    if experiment_option =="Experiment A":
+        df_experiment_A.to_csv(obs_file, index=False)
+        df_experiment_A_std.to_csv(noise_file, index=False)
+    elif experiment_option =="Experiment B":
+        df_experiment_B.to_csv(obs_file, index=False)
+        df_experiment_B_std.to_csv(noise_file, index=False)
 # Create polar coordinates
-
-
-
-
+    try:
+        client.resources.upload(
+            project_id=projects_dict[PROJECT_NAME],
+            name=obs_dataset_name,
+            resource_type="dataset",
+            file_path=obs_file,
+        )
+    except:
+        client.resources.update(
+            project_id=projects_dict[PROJECT_NAME],
+            resource_id=engine.get_resource_id(
+                client, PROJECT_NAME, obs_dataset_name, resource_type="dataset"
+            ),
+            resource_type="dataset",
+            file_path=obs_file,
+        )
+    try:
+        client.resources.upload(
+            project_id=projects_dict[PROJECT_NAME],
+            name=noise_dataset_name,
+            resource_type="dataset",
+            file_path=noise_file,
+        )
+    except:
+        client.resources.update(
+            project_id=projects_dict[PROJECT_NAME],
+            resource_id=engine.get_resource_id(
+                client, PROJECT_NAME, noise_dataset_name, resource_type="dataset"
+            ),
+            resource_type="dataset",
+            file_path=noise_file,
+        )
     df_experiment = 0
     df_experiment_std = 0
-    emulator_id = "Manchester_GDPS_Emulator"
-    emulator = tl.Emulator(id=emulator_id)
+    MODEL_NAME = "Manchester_GDPS_Emulator"
 
     try:
-        status.text("checking for existing emulator..." )
-        df_input = emulator.view_train_data()
-        scoreparams = tl.ScoreParams(metric="R2")
-        R2 = np.array(emulator.score(params=scoreparams)).flatten()[0]
+        status.text("checking for existing emulator...")
+
+        __ = engine.get_model_inputs(
+            client=client,
+            project_name=PROJECT_NAME,
+            model_name=MODEL_NAME,
+        )
+
+        # uncertainty_score = score(MODEL_NAME, bounds)
+
         emulator_exists = 1
-        if R2<0.99:
-            status.text("emulator exists but is not valid..." )    
 
 
-        else:
+        # if uncertainty_score > uncertainty_cutoff:
+        #     status.text("emulator exists but is not valid...")
 
-            status.text(f"emulator already exists with R squared of {R2}" )
-            emulator_performs = 1
+        # else:
+        #     # in the case that an emulator isn't found
+
+        #     status.text(
+        #         f"emulator already exists with uncertainty of {100*round(uncertainty_score,3)} %"
+        #     )
+        #     emulator_performs = 1
     except:
         emulator_exists = 0
+
     calib_result = 0
     if emulator_exists:
         if experiment_option == "Experiment A":
@@ -203,28 +292,36 @@ if st.sidebar.button("Run Inference"):
             df_experiment = df_experiment_B
             df_experiment_std = df_experiment_B_std
         status.text("Running inference..." )
-        calibparams = tl.CalibrateParams(return_summary=False,start_location = "optimized",iterations=10000)
-        calib_result = emulator.calibrate(df_experiment, df_experiment_std,params=calibparams)
-        # st.text(len(calib_result))
+        project_name = "UoM_LIBRTI"
+
+
+
+        calib_result = engine.infer_model_workflow(client=client,
+                            project_name=project_name,
+                            model_name=MODEL_NAME,
+                            obs_dataset_name=obs_dataset_name,
+                            noise_dataset_name=noise_dataset_name,
+                            lower_bounds=lower_bounds,
+                            upper_bounds=upper_bounds,
+                            nsamples=1000)
+
         colors_diff = []
-        for i in range(0,len(calib_result),1000):
 
-            fig3 = px.scatter_matrix(calib_result.iloc[:i],
-            dimensions=[X1_name,X2_name,X3_name])
-            fig3.update_traces(marker=dict(color = colors[1],opacity=0.3))
-            fig.update_layout(height=650)
-            calib_plot_holder.plotly_chart(fig3)
-            colors_diff.append(mcolors.to_hex(cmap(min(max(calib_result["diffusivity"].iloc[i]/10, 0), 1))))
-      
+        fig3 = px.scatter(x=calib_result[:,0],y=calib_result[:,1])
+        fig3.update_traces(marker=dict(color = colors[1],opacity=0.3))
+        fig3.update_layout(height=650)
+        fig3.update_layout(
+    xaxis_title="Diffusivity (1E-10 m²/s)",
+    yaxis_title="solubility (au)"
+)
+        calib_plot_holder.plotly_chart(fig3)
 
-            if colors_diff[-1] not in colors_diff[:-1]:
-                fig.update_traces(color=colors_diff[-1])
-                experiment_holder.plotly_chart(fig)
-            time.sleep(1)
+        time.sleep(1)
+        status.text("Inference Complete!" )
     else:
         status.text("No emulator")
-    status.text("Inference Complete!" )
-    mean = np.mean(calib_result["diffusivity"])
-    std = np.std(calib_result["diffusivity"])
-    st.text(f"diffusivity is {round(mean,3)} ± {round(mean,3)}")
+
+    mean = np.mean(calib_result[:,0])
+    std = np.std(calib_result[:,0])
+    update_experiment_plot(title=f"GDPS sample, diffusivity is {round(mean,3)} ± {round(std,3)}")
 
