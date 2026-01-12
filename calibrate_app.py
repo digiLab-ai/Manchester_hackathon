@@ -12,7 +12,7 @@ from uncertainty_engine.client import Client, Environment
 os.environ["UE_USERNAME"] = "cyd.cowley@digilab.ai"
 os.environ["UE_PASSWORD"] = ""
 
-client = Client(env="uat")
+client = Client(env="dev")
 client.authenticate()
 
 import plotly.express as px
@@ -49,8 +49,8 @@ noise_file = "Data//uncertainty.csv"
 input_columns = ["diffusivity", "solubility", "thickness"]
 
 
-lower_bounds = [0.02,1.0]
-upper_bounds = [0.08,100.0]
+lower_bounds = [0.1,0.02,1.99]
+upper_bounds = [10,0.08,2.0]
 obs_dataset_name = "observations"
 noise_dataset_name = "uncertainty"
 
@@ -176,8 +176,6 @@ experiment_option = st.sidebar.selectbox(
     ("Experiment A","Experiment B"),
 )
 
-constant = 1E9
-
 
 
 
@@ -219,7 +217,7 @@ if st.sidebar.button("Run Inference"):
     elif experiment_option =="Experiment B":
         df_experiment_B.to_csv(obs_file, index=False)
         df_experiment_B_std.to_csv(noise_file, index=False)
-# Create polar coordinates
+
     try:
         client.resources.upload(
             project_id=projects_dict[PROJECT_NAME],
@@ -254,7 +252,7 @@ if st.sidebar.button("Run Inference"):
         )
     df_experiment = 0
     df_experiment_std = 0
-    MODEL_NAME = "Manchester_GDPS_Emulator"
+    MODEL_NAME = "UoM_TMAP_model"
 
     try:
         status.text("checking for existing emulator...")
